@@ -18,15 +18,16 @@ package com.splunk.logging;
 
 
 import java.util.LinkedHashMap;
+import java.util.regex.Pattern;
 
 /**
- * <tt>SplunkCimLogEvent</tt> encapsulates the best practice logging semantics recommended by Splunk.
+ * <code>SplunkCimLogEvent</code> encapsulates the best practice logging semantics recommended by Splunk.
  *
  * It produces events of key, value pairs, properly formatted and quoted for logging with any of Java's standard
  * logging libraries (logback, log4j, java.util.logging, etc.) and indexing by Splunk. The class has convenience
  * methods to set the fields defined in the standard Splunk Common Information Model.
  *
- * <tt>SplunkCimLogEvent</tt> adds no timestamp to its fields, leaving you free to configure whatever timestamp
+ * <code>SplunkCimLogEvent</code> adds no timestamp to its fields, leaving you free to configure whatever timestamp
  * format you prefer in your logging configuration.
  *
  * <code>
@@ -56,8 +57,8 @@ public class SplunkCimLogEvent {
     private LinkedHashMap<String, Object> entries;
 
     /**
-     * @param eventName
-     * @param eventID
+     * @param eventName event name
+     * @param eventID event ID
      */
     public SplunkCimLogEvent(String eventName, String eventID) {
         entries = new LinkedHashMap<String, Object>();
@@ -68,12 +69,12 @@ public class SplunkCimLogEvent {
 
     /**
      * Add a key value pair. The value may be any Java object which returns a sensible
-     * result from its <tt>toString</tt> method.
+     * result from its <code>toString</code> method.
      *
-     * For logging exceptions, consider using <tt>addThrowableWithStacktrace</tt> instead.
+     * For logging exceptions, consider using <code>addThrowableWithStacktrace</code> instead.
      *
-     * @param key
-     * @param value
+     * @param key key
+     * @param value value
      */
     public void addField(String key, Object value) {
         entries.put(key, value);
@@ -91,7 +92,7 @@ public class SplunkCimLogEvent {
     }
 
     /**
-     * Logs an exception with the first <tt>stacktraceDepth</tt> elements of its stacktrace nicely
+     * Logs an exception with the first <code>stacktraceDepth</code> elements of its stacktrace nicely
      * formatted for indexing and searching by Splunk,
      *
      *
@@ -106,16 +107,19 @@ public class SplunkCimLogEvent {
         addField(THROWABLE_MESSAGE, throwable.getMessage());
 
         StackTraceElement[] elements = throwable.getStackTrace();
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         for (int depth = 0; depth < elements.length && depth < stacktraceDepth; depth++) {
             if (depth > 0)
                 sb.append(",");
             sb.append(elements[depth].toString());
         }
 
-        addField(THROWABLE_STACKTRACE_ELEMENTS, sb.toString());
+        if (stacktraceDepth > 0) {
+            addField(THROWABLE_STACKTRACE_ELEMENTS, sb.toString());
+        }
     }
 
+    private static final Pattern DOUBLE_QUOTE = Pattern.compile("\"");
     @Override
     public String toString() {
         StringBuilder output = new StringBuilder();
@@ -127,13 +131,13 @@ public class SplunkCimLogEvent {
             } else {
                 first = false;
             }
-            String value = entries.get(key).toString();
+            String value = String.valueOf(entries.get(key));
 
             // Escape any " that appear in the key or value.
-            key = key.replaceAll("\"", "\\\\\"");
-            value = value.replaceAll("\"", "\\\\\"");
+            key = DOUBLE_QUOTE.matcher(key).replaceAll("\\\\\"");
+            value = DOUBLE_QUOTE.matcher(value).replaceAll("\\\\\"");
 
-            output.append(QUOTE + key + KVDELIM + value + QUOTE);
+            output.append(QUOTE).append(key).append(KVDELIM).append(value).append(QUOTE);
         }
 
         return output.toString();

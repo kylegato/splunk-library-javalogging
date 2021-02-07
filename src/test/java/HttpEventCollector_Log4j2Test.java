@@ -17,8 +17,12 @@
 import java.io.*;
 import java.util.*;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import com.splunk.logging.HttpEventCollectorErrorHandler;
 import com.splunk.logging.HttpEventCollectorEventInfo;
+
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.core.LoggerContext;
 import org.junit.Assert;
 import org.junit.Test;
@@ -27,7 +31,7 @@ import org.apache.logging.log4j.Logger;
 public final class HttpEventCollector_Log4j2Test {
     private String httpEventCollectorName = "Log4j2Test";
     List<List<HttpEventCollectorEventInfo>> errors = new ArrayList<List<HttpEventCollectorEventInfo>>();
-    List<HttpEventCollectorErrorHandler.ServerErrorException> logEx = new ArrayList<HttpEventCollectorErrorHandler.ServerErrorException>();
+    List<HttpEventCollectorErrorHandler.ServerErrorException> logEx = new ArrayList<>();
 
     /**
      * sending a message via httplogging using log4j2 to splunk
@@ -326,7 +330,7 @@ public final class HttpEventCollector_Log4j2Test {
         Assert.assertTrue(errors.size() >= 1);
 
         System.out.println(logEx.toString());
-        if(!logEx.toString().contains("Connection refused"))
+        if (!StringUtils.containsAny(logEx.toString(), "Failed to connect to", "Remote host terminated the handshake", "Connection reset"))
             Assert.fail(String.format("Unexpected error message '%s'", logEx.toString()));
     }
 
@@ -337,7 +341,7 @@ public final class HttpEventCollector_Log4j2Test {
     public void eventsIsIndexedInOrderOfSent() throws Exception {
         TestUtil.enableHttpEventCollector();
 
-        String indexName="httpevents_in_order";
+        String indexName="httpevents_in_order_l42";
         TestUtil.createIndex(indexName);
         String token = TestUtil.createHttpEventCollectorToken(httpEventCollectorName);
         String loggerName = "splunkLogger4j2OrderOfSent";
@@ -365,5 +369,59 @@ public final class HttpEventCollector_Log4j2Test {
 
         TestUtil.deleteHttpEventCollectorToken(httpEventCollectorName);
         System.out.println("====================== Test pass=========================");
+    }
+    
+    /**
+     * Test sending a JSON and text message with "_json" source type via http logging appender using log4j 2.x logger
+     */
+    @Test
+    public void canSendJsonEventUsingUtilLoggerWithJsonSourceType() throws Exception {
+        canSendJsonEventUsingUtilLoggerWithSourceType("_json");
+    }
+    
+    /**
+     * Test sending a JSON and text message with "battlecat_test" source type via http logging appender using log4j 2.x logger
+     */
+    @Test
+    public void canSendJsonEventUsingUtilLoggerWithDefaultSourceType() throws Exception {
+        canSendJsonEventUsingUtilLoggerWithSourceType("battlecat_test");
+    }
+    
+    @SuppressWarnings("unchecked")
+    private void canSendJsonEventUsingUtilLoggerWithSourceType(final String sourceType) throws Exception {
+        final String token = TestUtil.createHttpEventCollectorToken(httpEventCollectorName);
+
+        final String loggerName = "splunkLog4j2";
+        
+        // Build User input map
+        final HashMap<String, String> userInputs = TestUtil.buildUserInputMap(loggerName, token, sourceType, "json");
+        
+        final LoggerContext context = TestUtil.resetLog4j2Configuration("log4j2_template.xml", "log4j2.xml", userInputs);
+        
+        final Logger logger = context.getLogger(loggerName);
+
+        final List<String> msgs = new ArrayList<String>();
+
+        final long timeMillsec = new Date().getTime();
+
+        final JsonObject jsonObject = new JsonObject();
+        jsonObject.add("transactionId", new JsonPrimitive("11"));
+        jsonObject.add("userId", new JsonPrimitive("21"));
+        jsonObject.add("eventTimestamp", new JsonPrimitive(timeMillsec));
+
+        // Test with a json event message
+        jsonObject.add("severity", new JsonPrimitive("info"));
+        final String infoJson = jsonObject.toString();
+        logger.info(infoJson);
+        msgs.add(infoJson);
+
+
+        // Test with a text event message
+        final String infoText = String.format("{EventTimestamp:%s, EventMsg:'this is a text info for log4j2 logger}", timeMillsec);
+        logger.info(infoText);
+        msgs.add(infoText);
+
+        TestUtil.verifyEventsSentToSplunk(msgs);
+        TestUtil.deleteHttpEventCollectorToken(httpEventCollectorName);
     }
 }

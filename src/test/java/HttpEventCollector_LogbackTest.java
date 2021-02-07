@@ -16,8 +16,12 @@
 
 import java.util.*;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import com.splunk.logging.HttpEventCollectorErrorHandler;
 import com.splunk.logging.HttpEventCollectorEventInfo;
+
+import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -311,12 +315,14 @@ public final class HttpEventCollector_LogbackTest {
             Thread.sleep(1000);
         }
 
+        TestUtil.enableHttpEventCollector();
+        
         if (logEx == null)
             Assert.fail("didn't catch errors");
         Assert.assertEquals(1, errors.size());
 
         System.out.println(logEx.toString());
-        if(!logEx.toString().contains("Connection refused"))
+        if (!StringUtils.containsAny(logEx.toString(), "Failed to connect to", "Remote host terminated the handshake", "Connection reset"))
             Assert.fail(String.format("Unexpected error message '%s'", logEx.toString()));
     }
 
@@ -327,7 +333,7 @@ public final class HttpEventCollector_LogbackTest {
     public void eventsIsIndexedInOrderOfSent() throws Exception {
         TestUtil.enableHttpEventCollector();
         String token = TestUtil.createHttpEventCollectorToken(httpEventCollectorName);
-        String indexName = "httpevents_in_order";
+        String indexName = "httpevents_in_order_lb";
         TestUtil.createIndex(indexName);
 
         String loggerName = "logBackLogger";
@@ -356,5 +362,64 @@ public final class HttpEventCollector_LogbackTest {
 
         TestUtil.deleteHttpEventCollectorToken(httpEventCollectorName);
         System.out.println("====================== Test pass=========================");
+    }
+    
+    /**
+     * Test sending a JSON and text message with "_json" source type via http logging appender using logback
+     */
+    @Test
+    public void canSendJsonEventUsingLogbackWithJsonSourceType() throws Exception {
+        canSendJsonEventUsingLogbackWithSourceType("_json");
+    }
+    
+    /**
+     * Test sending a JSON and text message with "battlecat_test" source type via http logging appender using logback
+     */
+    @Test
+    public void canSendJsonEventUsingLogbackWithDefaultSourceType() throws Exception {
+        canSendJsonEventUsingLogbackWithSourceType("battlecat_test");
+    }
+    
+    @SuppressWarnings("unchecked")
+    private void canSendJsonEventUsingLogbackWithSourceType(final String sourceType) throws Exception {
+        String token = TestUtil.createHttpEventCollectorToken(httpEventCollectorName);
+
+        final String loggerName = "logBackLogger";
+
+        // Build User input map
+        final HashMap<String, String> userInputs = TestUtil.buildUserInputMap(loggerName, token, sourceType, "json");
+
+        TestUtil.resetLogbackConfiguration("logback_template.xml", "logback.xml", userInputs);
+
+        final List<String> msgs = new ArrayList<>();
+
+        final long timeMillsec = new Date().getTime();
+
+        final JsonObject jsonObject = new JsonObject();
+        jsonObject.add("transactionId", new JsonPrimitive("11"));
+        jsonObject.add("userId", new JsonPrimitive("21"));
+        jsonObject.add("eventTimestamp", new JsonPrimitive(timeMillsec));
+
+        final Logger logger = LoggerFactory.getLogger(loggerName);
+
+        // Test with a json event message
+        jsonObject.add("severity", new JsonPrimitive("info"));
+        final String infoJson = jsonObject.toString();
+        logger.info(infoJson);
+        msgs.add(infoJson);
+
+        jsonObject.add("severity", new JsonPrimitive("error"));
+        final String errorJson = jsonObject.toString();
+        logger.error(errorJson);
+        msgs.add(errorJson);
+
+        // Test with a text event message
+        jsonObject.add("severity", new JsonPrimitive("debug"));
+        final String debugText = String.format("{EventTimestamp:%s, EventMsg:'this is a test debug for Logback Test}", timeMillsec);
+        logger.debug(debugText);
+        msgs.add(debugText);
+
+        TestUtil.verifyEventsSentToSplunk(msgs);
+        TestUtil.deleteHttpEventCollectorToken(httpEventCollectorName);
     }
 }

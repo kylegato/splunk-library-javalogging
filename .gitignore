@@ -6,3 +6,11 @@ target
 pom.xml.old
 pom.xml.orig
 TODOS
+
+# Ignore Eclipse IDE config files
+.classpath
+.project
+.settings
+
+docs
+docs.zip

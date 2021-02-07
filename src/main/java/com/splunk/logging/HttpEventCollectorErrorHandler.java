@@ -18,14 +18,14 @@ package com.splunk.logging;
  * under the License.
  */
 
-import org.json.simple.JSONObject;
-import org.json.simple.parser.JSONParser;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
 import java.util.List;
 
 /**
- * @brief Splunk http event collector error handler.
+ * Splunk http event collector error handler.
  *
- * @details
  * A user application can utilize HttpEventCollectorErrorHandler in order to detect errors
  * caused by network connection and/or Splunk server.
  *
@@ -43,20 +43,19 @@ public class HttpEventCollectorErrorHandler {
     public static class ServerErrorException extends Exception {
         private String reply;
         private long errorCode = -1;
-        private String errorText = "unknown error";
+        private String errorText;
 
         /**
          * Create an exception with server error reply
-         * @param serverReply
+         * @param serverReply server reply
          */
         public ServerErrorException(final String serverReply) {
             reply = serverReply;
-            JSONParser jsonParser = new JSONParser();
             try {
                 // read server reply
-                JSONObject json = (JSONObject)jsonParser.parse(serverReply);
-                errorCode = (Long)json.get("code");
-                errorText = (String)json.get("text");
+                JsonObject json = JsonParser.parseString(serverReply).getAsJsonObject();
+                errorCode = json.get("code").getAsLong();
+                errorText = json.get("text").getAsString();
             } catch (Exception e) {
                 errorText = e.getMessage();
             }
@@ -83,6 +82,12 @@ public class HttpEventCollectorErrorHandler {
             return errorText;
         }
 
+        @Override
+        public String getMessage() {
+            return getErrorText();
+        }
+
+
         @Override public String toString() {
             return getReply();
         }
@@ -96,7 +101,7 @@ public class HttpEventCollectorErrorHandler {
 
     /**
      * Register error callbacks
-     * @param callback
+     * @param callback ErrorCallback
      */
     public static void onError(ErrorCallback callback) {
         errorCallback = callback;
@@ -104,7 +109,7 @@ public class HttpEventCollectorErrorHandler {
 
     /**
      * Report an exception
-     * @param data
+     * @param data eventdata
      * @param ex is an exception thrown by posting or processing data
      */
     public static void error(final List<HttpEventCollectorEventInfo> data, final Exception ex) {

@@ -19,9 +19,9 @@ package com.splunk.logging;
  */
 
 /**
- * @brief A handler for java.util.logging that works with Splunk http event collector.
+ * A handler for java.util.logging that works with Splunk http event collector.
  *
- * @details
+ * details
  * This is a Splunk custom java.util.logging handler that intercepts logging
  * information and forwards it to a Splunk server through http event collector.
  * @todo - link to http event collector documentation
@@ -80,9 +80,9 @@ package com.splunk.logging;
  * com.splunk.logging.HttpEventCollectorLoggingHandler.send_mode=sequential
  */
 
-import java.util.Dictionary;
-import java.util.Hashtable;
-import java.util.Locale;
+import com.splunk.logging.hec.MetadataTags;
+
+import java.util.*;
 import java.util.logging.Handler;
 import java.util.logging.LogManager;
 import java.util.logging.LogRecord;
@@ -94,6 +94,14 @@ import java.util.logging.LogRecord;
  */
 public final class HttpEventCollectorLoggingHandler extends Handler {
     private HttpEventCollectorSender sender = null;
+    private final String IncludeLoggerNameConfTag = "include_logger_name";
+    private final boolean includeLoggerName;
+    private final String IncludeThreadNameConfTag = "include_thread_name";
+    private final boolean includeThreadName;
+    private final String IncludeExceptionConfTag = "include_exception";
+    private final boolean includeException;
+
+
     private final String BatchDelayConfTag = "batch_interval";
     private final String BatchCountConfTag = "batch_size_count";
     private final String BatchSizeConfTag = "batch_size_bytes";
@@ -105,24 +113,34 @@ public final class HttpEventCollectorLoggingHandler extends Handler {
     /** HttpEventCollectorLoggingHandler c-or */
     public HttpEventCollectorLoggingHandler() {
         // read configuration settings
-        Dictionary<String, String> metadata = new Hashtable<String, String>();
-        metadata.put(HttpEventCollectorSender.MetadataHostTag,
-                getConfigurationProperty(HttpEventCollectorSender.MetadataHostTag, ""));
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put(MetadataTags.HOST,
+                getConfigurationProperty(MetadataTags.HOST, ""));
 
-        metadata.put(HttpEventCollectorSender.MetadataIndexTag,
-                getConfigurationProperty(HttpEventCollectorSender.MetadataIndexTag, ""));
+        metadata.put(MetadataTags.INDEX,
+                getConfigurationProperty(MetadataTags.INDEX, ""));
 
-        metadata.put(HttpEventCollectorSender.MetadataSourceTag,
-                getConfigurationProperty(HttpEventCollectorSender.MetadataSourceTag, ""));
+        metadata.put(MetadataTags.SOURCE,
+                getConfigurationProperty(MetadataTags.SOURCE, ""));
 
-        metadata.put(HttpEventCollectorSender.MetadataSourceTypeTag,
-                getConfigurationProperty(HttpEventCollectorSender.MetadataSourceTypeTag, ""));
+        metadata.put(MetadataTags.SOURCETYPE,
+                getConfigurationProperty(MetadataTags.SOURCETYPE, ""));
+        
+        // Extract message format value
+        metadata.put(MetadataTags.MESSAGEFORMAT,
+            getConfigurationProperty(MetadataTags.MESSAGEFORMAT, ""));
 
         // http event collector endpoint properties
         String url = getConfigurationProperty(UrlConfTag, null);
 
         // app token
         String token = getConfigurationProperty("token", null);
+
+        //app channel
+        String channel = getConfigurationProperty("channel", "");
+
+        //app type
+        String type = getConfigurationProperty("type", "");
 
         // batching properties
         long delay = getConfigurationNumericProperty(BatchDelayConfTag, HttpEventCollectorSender.DefaultBatchInterval);
@@ -131,16 +149,30 @@ public final class HttpEventCollectorLoggingHandler extends Handler {
         long retriesOnError = getConfigurationNumericProperty(RetriesOnErrorTag, 0);
         String sendMode = getConfigurationProperty(SendModeTag, "sequential");
         String middleware = getConfigurationProperty(MiddlewareTag, "");
+        String eventBodySerializer = getConfigurationProperty("eventBodySerializer", "");
+
+        includeLoggerName = getConfigurationBooleanProperty(IncludeLoggerNameConfTag, true);
+        includeThreadName = getConfigurationBooleanProperty(IncludeThreadNameConfTag, true);
+        includeException = getConfigurationBooleanProperty(IncludeExceptionConfTag, true);
 
         // delegate all configuration params to event sender
         this.sender = new HttpEventCollectorSender(
-                url, token, delay, batchCount, batchSize, sendMode, metadata);
+                url, token, channel, type, delay, batchCount, batchSize, sendMode, metadata);
 
         // plug a user middleware
         if (middleware != null && !middleware.isEmpty()) {
             try {
                 this.sender.addMiddleware((HttpEventCollectorMiddleware.HttpSenderMiddleware)(Class.forName(middleware).newInstance()));
-            } catch (Exception e) {}
+            } catch (Exception ignored) {}
+        }
+
+        if (eventBodySerializer != null && !eventBodySerializer.isEmpty()) {
+            try {
+                this.sender.setEventBodySerializer((EventBodySerializer) Class.forName(eventBodySerializer).newInstance());
+            } catch (final Exception ex) {
+                //output error msg but not fail, it will default to use the default EventBodySerializer
+                System.out.println(ex);
+            }
         }
 
         // plug retries middleware
@@ -162,10 +194,10 @@ public final class HttpEventCollectorLoggingHandler extends Handler {
         this.sender.send(
                 record.getLevel().toString(),
                 record.getMessage(),
-                record.getLoggerName(),
-                String.format(Locale.US, "%d", record.getThreadID()),
+                includeLoggerName ? record.getLoggerName() : null,
+                includeThreadName ? String.format(Locale.US, "%d", record.getThreadID()) : null,
                 null, // no property map available
-                record.getThrown() == null ? null : record.getThrown().getMessage(),
+                (!includeException || record.getThrown() == null) ? null : record.getThrown().getMessage(),
                 null // no marker available
         );
     }
@@ -180,7 +212,7 @@ public final class HttpEventCollectorLoggingHandler extends Handler {
 
     /**
      * java.util.logging data handler close callback
-     * @throws SecurityException
+     * @throws SecurityException throw security exception
      */
     @Override
     public void close() throws SecurityException {
@@ -209,5 +241,11 @@ public final class HttpEventCollectorLoggingHandler extends Handler {
             final String property, long defaultValue) {
         return Integer.parseInt(
                 getConfigurationProperty(property, String.format("%d", defaultValue)));
+    }
+
+    private boolean getConfigurationBooleanProperty(
+            final String property, boolean defaultValue) {
+        return Boolean.valueOf(
+                getConfigurationProperty(property, String.valueOf(defaultValue)));
     }
 }

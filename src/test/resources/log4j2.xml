@@ -15,7 +15,7 @@ License for the specific language governing permissions and limitations
 under the License.
 -->
 
-<Configuration status="info" name="example" packages="">
+<Configuration status="info" name="example" packages="com.splunk.logging">
     <!-- Define an appender that writes to a TCP socket. We use Log4J's SocketAppender, which
          is documented at
 
@@ -32,20 +32,21 @@ under the License.
             <PatternLayout pattern="%p: %m%n" charset="UTF-8"/>
         </Socket>
         
-        <Http name="http-input"
-              url="http://localhost:5555/services/collector/event/1.0"
+        <SplunkHttp name="http-input"
+              url="http://localhost:5555"
               token="11111111-2222-3333-4444-555555555555"
               host=""
               index=""
               source="splunktest"
               sourcetype="battlecat"
+              messageFormat="text"
               middleware="HttpEventCollectorUnitTestMiddleware"
               batch_size_bytes="0"
               batch_size_count="0"
               batch_interval="0"
               disableCertificateValidation="true">
             <PatternLayout pattern="%m"/>
-        </Http>
+        </SplunkHttp>
     </Appenders>
     <!-- Define a logger named 'splunk.logger' which writes to the socket appender we defined above. -->
     <Loggers>

@@ -17,12 +17,16 @@ package com.splunk.logging;
 
 import java.io.Serializable;
 import java.nio.charset.Charset;
-import java.util.Dictionary;
-import java.util.Hashtable;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
+import com.splunk.logging.hec.MetadataTags;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.Filter;
 import org.apache.logging.log4j.core.Layout;
+import org.apache.logging.log4j.core.config.Property;
 import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.config.plugins.Plugin;
@@ -33,21 +37,34 @@ import org.apache.logging.log4j.core.config.plugins.PluginFactory;
 /**
  * Splunk Http Appender.
  */
-@Plugin(name = "Http", category = "Core", elementType = "appender", printObject = true)
+@Plugin(name = "SplunkHttp", category = "Core", elementType = "appender", printObject = true)
 @SuppressWarnings("serial")
 public final class HttpEventCollectorLog4jAppender extends AbstractAppender
 {
     private HttpEventCollectorSender sender = null;
+    private final boolean includeLoggerName;
+    private final boolean includeThreadName;
+    private final boolean includeMDC;
+    private final boolean includeException;
+    private final boolean includeMarker;
 
     private HttpEventCollectorLog4jAppender(final String name,
                          final String url,
                          final String token,
+                         final String channel,
+                         final String type,
                          final String source,
                          final String sourcetype,
+                         final String messageFormat,
                          final String host,
                          final String index,
                          final Filter filter,
                          final Layout<? extends Serializable> layout,
+                         final boolean includeLoggerName,
+                         final boolean includeThreadName,
+                         final boolean includeMDC,
+                         final boolean includeException,
+                         final boolean includeMarker,
                          final boolean ignoreExceptions,
                          long batchInterval,
                          long batchCount,
@@ -55,22 +72,30 @@ public final class HttpEventCollectorLog4jAppender extends AbstractAppender
                          long retriesOnError,
                          String sendMode,
                          String middleware,
-                         final String disableCertificateValidation)
+                         final String disableCertificateValidation,
+                         final String eventBodySerializer)
     {
-        super(name, filter, layout, ignoreExceptions);
-        Dictionary<String, String> metadata = new Hashtable<String, String>();
-        metadata.put(HttpEventCollectorSender.MetadataHostTag, host != null ? host : "");
-        metadata.put(HttpEventCollectorSender.MetadataIndexTag, index != null ? index : "");
-        metadata.put(HttpEventCollectorSender.MetadataSourceTag, source != null ? source : "");
-        metadata.put(HttpEventCollectorSender.MetadataSourceTypeTag, sourcetype != null ? sourcetype : "");
+        super(name, filter, layout, ignoreExceptions, Property.EMPTY_ARRAY);
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put(MetadataTags.HOST, host != null ? host : "");
+        metadata.put(MetadataTags.INDEX, index != null ? index : "");
+        metadata.put(MetadataTags.SOURCE, source != null ? source : "");
+        metadata.put(MetadataTags.SOURCETYPE, sourcetype != null ? sourcetype : "");
+        metadata.put(MetadataTags.MESSAGEFORMAT, messageFormat != null ? messageFormat : "");
 
-        this.sender = new HttpEventCollectorSender(url, token, batchInterval, batchCount, batchSize, sendMode, metadata);
+        this.sender = new HttpEventCollectorSender(url, token, channel, type, batchInterval, batchCount, batchSize, sendMode, metadata);
 
         // plug a user middleware
         if (middleware != null && !middleware.isEmpty()) {
             try {
                 this.sender.addMiddleware((HttpEventCollectorMiddleware.HttpSenderMiddleware)(Class.forName(middleware).newInstance()));
-            } catch (Exception e) {}
+            } catch (Exception ignored) {}
+        }
+
+        if (eventBodySerializer != null && !eventBodySerializer.isEmpty()) {
+            try {
+                this.sender.setEventBodySerializer((EventBodySerializer) Class.forName(eventBodySerializer).newInstance());
+            } catch (final Exception ignored) {}
         }
 
         // plug resend middleware
@@ -81,6 +106,12 @@ public final class HttpEventCollectorLog4jAppender extends AbstractAppender
         if (disableCertificateValidation != null && disableCertificateValidation.equalsIgnoreCase("true")) {
             this.sender.disableCertificateValidation();
         }
+
+        this.includeLoggerName = includeLoggerName;
+        this.includeThreadName = includeThreadName;
+        this.includeMDC = includeMDC;
+        this.includeException = includeException;
+        this.includeMarker = includeMarker;
     }
 
     /**
@@ -92,12 +123,15 @@ public final class HttpEventCollectorLog4jAppender extends AbstractAppender
             // @formatter:off
             @PluginAttribute("url") final String url,
             @PluginAttribute("token") final String token,
+            @PluginAttribute("channel") final String channel,
+            @PluginAttribute("type") final String type,
             @PluginAttribute("name") final String name,
             @PluginAttribute("source") final String source,
             @PluginAttribute("sourcetype") final String sourcetype,
+            @PluginAttribute("messageFormat") final String messageFormat,
             @PluginAttribute("host") final String host,
             @PluginAttribute("index") final String index,
-            @PluginAttribute("ignoreExceptions") final String ignore,
+            @PluginAttribute(value = "ignoreExceptions", defaultBoolean = true) final String ignoreExceptions,
             @PluginAttribute("batch_size_bytes") final String batchSize,
             @PluginAttribute("batch_size_count") final String batchCount,
             @PluginAttribute("batch_interval") final String batchInterval,
@@ -105,6 +139,12 @@ public final class HttpEventCollectorLog4jAppender extends AbstractAppender
             @PluginAttribute("send_mode") final String sendMode,
             @PluginAttribute("middleware") final String middleware,
             @PluginAttribute("disableCertificateValidation") final String disableCertificateValidation,
+            @PluginAttribute("eventBodySerializer") final String eventBodySerializer,
+            @PluginAttribute(value = "includeLoggerName", defaultBoolean = true) final boolean includeLoggerName,
+            @PluginAttribute(value = "includeThreadName", defaultBoolean = true) final boolean includeThreadName,
+            @PluginAttribute(value = "includeMDC", defaultBoolean = true) final boolean includeMDC,
+            @PluginAttribute(value = "includeException", defaultBoolean = true) final boolean includeException,
+            @PluginAttribute(value = "includeMarker", defaultBoolean = true) final boolean includeMarker,
             @PluginElement("Layout") Layout<? extends Serializable> layout,
             @PluginElement("Filter") final Filter filter
     )
@@ -129,22 +169,31 @@ public final class HttpEventCollectorLog4jAppender extends AbstractAppender
 
         if (layout == null)
         {
-            layout = PatternLayout.createLayout("%m", null, null, Charset.forName("UTF-8"), true, false, null, null);
+            layout = PatternLayout.newBuilder()
+                    .withPattern("%m")
+                    .withCharset(StandardCharsets.UTF_8)
+                    .withAlwaysWriteExceptions(true)
+                    .withNoConsoleNoAnsi(false)
+                    .build();
         }
 
-        final boolean ignoreExceptions = true;
+        final boolean ignoreExceptionsBool = Boolean.getBoolean(ignoreExceptions);
 
         return new HttpEventCollectorLog4jAppender(
-                name, url, token,
-                source, sourcetype, host, index,
-                filter, layout, ignoreExceptions,
+                name, url, token,  channel, type,
+                source, sourcetype, messageFormat, host, index,
+                filter, layout, 
+                includeLoggerName, includeThreadName, includeMDC, includeException, includeMarker,
+                ignoreExceptionsBool,
                 parseInt(batchInterval, HttpEventCollectorSender.DefaultBatchInterval),
                 parseInt(batchCount, HttpEventCollectorSender.DefaultBatchCount),
                 parseInt(batchSize, HttpEventCollectorSender.DefaultBatchSize),
                 parseInt(retriesOnError, 0),
                 sendMode,
                 middleware,
-                disableCertificateValidation);
+                disableCertificateValidation,
+                eventBodySerializer
+        );
     }
 
 
@@ -158,18 +207,18 @@ public final class HttpEventCollectorLog4jAppender extends AbstractAppender
         // if an exception was thrown
         this.sender.send(
                 event.getLevel().toString(),
-                event.getMessage().getFormattedMessage(),
-                event.getLoggerName(),
-                event.getThreadName(),
-                event.getContextMap(),
-                event.getThrown() == null ? null : event.getThrown().getMessage(),
-                event.getMarker()
+                getLayout().toSerializable(event).toString(),
+                includeLoggerName ? event.getLoggerName() : null,
+                includeThreadName ? event.getThreadName() : null,
+                includeMDC ? event.getContextData().toMap() : null,
+                (!includeException || event.getThrown() == null) ? null : event.getThrown().getMessage(),
+                includeMarker ? event.getMarker() : null
         );
     }
 
     @Override
-    public void stop() {
-        this.sender.flush();
-        super.stop();
+    public boolean stop(long timeout, TimeUnit timeUnit) {
+        this.sender.close();
+        return super.stop(timeout, timeUnit);
     }
 }
